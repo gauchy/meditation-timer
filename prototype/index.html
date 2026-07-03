@@ -531,7 +531,8 @@ const durLabel = m => m >= 60 ? `${Math.floor(m/60)}h${m%60?` ${m%60}m`:''}` : `
 const CIRC = 2 * Math.PI * 138;
 
 /* ---------- timer engine -------------------------------------------- */
-let T = { total: 30*60, left: 30*60, running: false, id: null, interval: 5 };
+let T = { total: 30*60, left: 30*60, running: false, id: null,
+          startAt: 0, pausedAt: 0, pausedMs: 0, lastMark: 0 };
 
 function drawTicks(totalMin, intMin) {
   const g = $('#ticks'); g.innerHTML = '';
@@ -556,7 +557,6 @@ function renderTimer() {
 }
 function setDuration(min) {
   T.total = min * 60; T.left = T.total;
-  T.interval = store.s.interval;
   $('#progress').style.strokeDashoffset = CIRC;
   $('#durRange').value = min;
   syncFill($('#durRange'));
@@ -565,14 +565,18 @@ function setDuration(min) {
   renderTimer();
 }
 
-let lastBellMark = -1;
 function tick() {
-  T.left--;
-  const elapsedMin = (T.total - T.left) / 60;
-  if (T.interval && T.left > 0) {
-    const mark = Math.floor((T.total - T.left) / (T.interval * 60));
-    if (mark > 0 && mark !== lastBellMark && (T.total - T.left) % (T.interval*60) === 0) {
-      lastBellMark = mark; strike(store.s.bell);
+  // wall-clock based: elapsed is real time since start, minus paused time.
+  // setInterval drift no longer accumulates — the clock self-corrects.
+  const elapsedSec = Math.floor((Date.now() - T.startAt - T.pausedMs) / 1000);
+  T.left = Math.max(0, T.total - elapsedSec);
+
+  const intSec = (store.s.interval || 0) * 60;
+  if (intSec && T.left > 0) {
+    const mark = Math.floor(elapsedSec / intSec);      // how many intervals passed
+    const totalMarks = Math.floor(T.total / intSec);
+    if (mark > T.lastMark && mark < totalMarks) {       // don't ring on the final mark (closing bell handles it)
+      T.lastMark = mark; strike(store.s.bell);          // rings once even if a mark was skipped
     }
   }
   renderTimer();
@@ -581,18 +585,24 @@ function tick() {
 function begin() {
   audio();
   T.running = true;
-  lastBellMark = -1;
+  T.startAt = Date.now(); T.pausedMs = 0; T.pausedAt = 0; T.lastMark = 0;
   document.getElementById('app').classList.remove('idle');
   $('#dial').classList.add('hidden');
   $('#startBtn').classList.add('hidden');
   $('#pauseBtn').classList.remove('hidden');
   $('#endBtn').classList.remove('hidden');
   strike(store.s.bell);                            // opening bell — always
-  T.id = setInterval(tick, 1000);
+  T.id = setInterval(tick, 250);                   // finer tick = smoother clock, wall-time keeps it accurate
 }
 function pause() {
-  if (T.running) { clearInterval(T.id); T.running = false; $('#pauseBtn').textContent = 'Resume'; }
-  else { T.id = setInterval(tick, 1000); T.running = true; $('#pauseBtn').textContent = 'Pause'; }
+  if (T.running) {
+    clearInterval(T.id); T.running = false; T.pausedAt = Date.now();
+    $('#pauseBtn').textContent = 'Resume';
+  } else {
+    T.pausedMs += Date.now() - T.pausedAt; T.running = true;
+    T.id = setInterval(tick, 250);
+    $('#pauseBtn').textContent = 'Pause';
+  }
 }
 function stopUI() {
   clearInterval(T.id); T.running = false;
@@ -742,26 +752,8 @@ function go(id) {
   if (id === 's-sum') renderSummary();
 }
 
-/* ---------- seed demo data (first run only) ------------------------- */
-function seedDemo() {
-  if (localStorage.getItem('res.seeded')) return;
-  const log = [];
-  const durs = [20, 30, 15, 45, 30, 60, 30, 20, 30, 40];
-  for (let i = 0; i < 24; i++) {
-    const back = Math.floor(i * 1.4);           // roughly last ~33 days
-    if (back > 33) break;
-    if (Math.random() < 0.18) continue;         // a few missed days
-    const d = new Date(); d.setDate(d.getDate() - back);
-    d.setHours(6 + Math.floor(Math.random()*3), Math.floor(Math.random()*59));
-    log.push({ ts: d.getTime(), min: durs[i % durs.length] });
-  }
-  store.log = log.sort((a,b)=>a.ts-b.ts);
-  localStorage.setItem('res.seeded', '1');
-}
-
 /* ---------- wire up -------------------------------------------------- */
 function init() {
-  seedDemo();
   const s = store.s;
 
   $('#today').textContent = new Date().toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'});
