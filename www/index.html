@@ -269,14 +269,28 @@
   .section-h .t { font-family: var(--font-disp); font-size: 19px; font-weight: 400; color: var(--sand); }
   .section-h .s { font-size: 12px; color: var(--dusk); }
 
-  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 7px; }
-  .cal .dow { font-size: 10px; text-align: center; color: var(--dusk); letter-spacing: .05em; padding-bottom: 2px; }
-  .cell { aspect-ratio: 1; border-radius: 8px; background: var(--ink-3); position: relative; }
-  .cell.l1 { background: rgba(216,168,96,.28); }
-  .cell.l2 { background: rgba(216,168,96,.55); }
-  .cell.l3 { background: rgba(216,168,96,.85); }
-  .cell.today { box-shadow: 0 0 0 1.5px var(--sand); }
-  .cell.empty { background: transparent; }
+  .cal-head { display:flex; align-items:center; justify-content:space-between; margin: 26px 0 14px; }
+  .cal-title { font-family: var(--font-disp); font-size: 20px; font-weight: 400; color: var(--sand); letter-spacing:.01em; }
+  .cal-title #calYear { color: var(--dusk); margin-left: 4px; }
+  .cal-nav-g { display:flex; gap: 6px; }
+  .cal-nav { width: 34px; height: 34px; border-radius: 10px; background: var(--ink-2); border: 1px solid var(--line);
+             color: var(--sand-dim); font-size: 15px; line-height: 1; display:flex; align-items:center; justify-content:center;
+             cursor:pointer; -webkit-tap-highlight-color: transparent; transition: background .12s, color .12s; }
+  .cal-nav:active { background: var(--ink-3); color: var(--sand); }
+
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .cal .dow { font-size: 10px; text-align: center; color: var(--dusk); letter-spacing: .08em; padding-bottom: 4px; }
+  .cell { aspect-ratio: 1; border-radius: 10px; position: relative; display:flex; align-items:center; justify-content:center; }
+  .cell .n { font-size: 13px; color: var(--sand-dim); font-variant-numeric: tabular-nums; }
+  .cell.empty { visibility: hidden; }
+  .cell.future .n { color: var(--dusk); opacity: .45; }
+  .cell.sat { background: rgba(216,168,96,.16); }
+  .cell.sat .n { color: var(--brass-soft); font-weight: 600; }
+  .cell.sat::after { content:''; position:absolute; bottom: 5px; left:50%; transform: translateX(-50%);
+                     width: 4px; height: 4px; border-radius: 50%; background: var(--brass); }
+  .cell.today { box-shadow: inset 0 0 0 1.5px var(--dusk); }
+  .cell.sat.today { box-shadow: inset 0 0 0 1.5px var(--brass); }
+  .cal-foot { font-size: 12px; color: var(--dusk); text-align:center; margin-top: 12px; }
 
   .sessions { display: flex; flex-direction: column; margin-top: 4px; }
   .sess { display: flex; align-items: center; gap: 14px; padding: 13px 2px; border-bottom: 1px solid var(--line); }
@@ -419,22 +433,35 @@
           <div class="foot" id="sumStreakFoot">Keep it alive today</div>
         </div>
         <div class="stat">
+          <div class="k">This week</div>
+          <div class="v"><span id="sumWeek">0</span><small>min</small></div>
+          <div class="foot" id="sumWeekFoot">across 0 sits</div>
+        </div>
+        <div class="stat">
           <div class="k">This month</div>
           <div class="v"><span id="sumMonth">0</span><small>min</small></div>
           <div class="foot" id="sumMonthFoot">across 0 sits</div>
         </div>
-        <div class="stat wide">
+        <div class="stat">
           <div class="k">All time</div>
           <div class="v"><span id="sumTotal">0</span><small>hours</small></div>
-          <div class="foot" id="sumTotalFoot">0 sessions · longest 0 min</div>
+          <div class="foot" id="sumTotalFoot">0 sessions</div>
         </div>
       </div>
 
-      <div class="section-h">
-        <span class="t">Last 5 weeks</span>
-        <span class="s">minutes per day</span>
+      <div class="cal-head">
+        <div class="cal-nav-g">
+          <button class="cal-nav" id="calPrevY" aria-label="Previous year">«</button>
+          <button class="cal-nav" id="calPrev" aria-label="Previous month">‹</button>
+        </div>
+        <div class="cal-title"><span id="calMonth">Month</span><span id="calYear">2026</span></div>
+        <div class="cal-nav-g">
+          <button class="cal-nav" id="calNext" aria-label="Next month">›</button>
+          <button class="cal-nav" id="calNextY" aria-label="Next year">»</button>
+        </div>
       </div>
       <div class="cal" id="cal"></div>
+      <div class="cal-foot" id="calFoot"></div>
 
       <div class="section-h">
         <span class="t">Recent sits</span>
@@ -687,7 +714,48 @@ function refreshSettings() {
 }
 
 /* ---------- summary -------------------------------------------------- */
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+let calV = null; // {y, m} currently shown month
 function dayKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
+function calByDay() { const b = {}; store.log.forEach(e => { const k = dayKey(e.ts); b[k] = (b[k]||0) + e.min; }); return b; }
+function calStep(dm, dy) {
+  if (!calV) { const n = new Date(); calV = { y: n.getFullYear(), m: n.getMonth() }; }
+  let m = calV.m + dm, y = calV.y + dy;
+  while (m < 0) { m += 12; y--; }
+  while (m > 11) { m -= 12; y++; }
+  calV = { y, m }; renderCalendar();
+}
+function renderCalendar() {
+  if (!calV) { const n = new Date(); calV = { y: n.getFullYear(), m: n.getMonth() }; }
+  const { y, m } = calV;
+  const byDay = calByDay();
+  $('#calMonth').textContent = MONTHS[m];
+  $('#calYear').textContent = y;
+
+  const cal = $('#cal'); cal.innerHTML = '';
+  ['S','M','T','W','T','F','S'].forEach(x => { const h=document.createElement('div'); h.className='dow'; h.textContent=x; cal.appendChild(h); });
+  const lead = new Date(y, m, 1).getDay();
+  const days = new Date(y, m+1, 0).getDate();
+  for (let i=0;i<lead;i++){ const c=document.createElement('div'); c.className='cell empty'; cal.appendChild(c); }
+
+  const todayK = dayKey(Date.now());
+  const endOfToday = new Date(); endOfToday.setHours(23,59,59,999);
+  let satDays = 0, satMin = 0;
+  for (let dnum=1; dnum<=days; dnum++){
+    const dt = new Date(y, m, dnum);
+    const mins = byDay[dayKey(dt.getTime())] || 0;
+    const c = document.createElement('div'); c.className = 'cell';
+    c.innerHTML = `<span class="n">${dnum}</span>`;
+    if (mins > 0) { c.classList.add('sat'); satDays++; satMin += mins; c.title = `${dt.toDateString()} · ${mins} min`; }
+    if (dayKey(dt.getTime()) === todayK) c.classList.add('today');
+    if (dt > endOfToday) c.classList.add('future');
+    cal.appendChild(c);
+  }
+
+  $('#calFoot').textContent = satDays
+    ? `${satDays} day${satDays!==1?'s':''} sat · ${satMin} min in ${MONTHS[m]}`
+    : `No sits in ${MONTHS[m]} ${y}`;
+}
 function renderSummary() {
   const log = store.log;
   const byDay = {};
@@ -700,6 +768,11 @@ function renderSummary() {
   if (!byDay[dayKey(d.getTime())]) d.setDate(d.getDate() - 1);
   while (byDay[dayKey(d.getTime())]) { streak++; d.setDate(d.getDate() - 1); }
 
+  // this week (Sunday-start)
+  const wkStart = new Date(); wkStart.setHours(0,0,0,0); wkStart.setDate(wkStart.getDate() - wkStart.getDay());
+  let weekMin = 0, weekSits = 0;
+  log.forEach(e => { if (e.ts >= wkStart.getTime()) { weekMin += e.min; weekSits++; } });
+
   // month
   const now = new Date();
   let monthMin = 0, monthSits = 0;
@@ -708,26 +781,16 @@ function renderSummary() {
   $('#streakN').textContent = streak;
   $('#sumStreak').textContent = streak;
   $('#sumStreakFoot').textContent = byDay[dayKey(Date.now())] ? 'You sat today' : 'Keep it alive today';
+  $('#sumWeek').textContent = weekMin;
+  $('#sumWeekFoot').textContent = `across ${weekSits} sit${weekSits!==1?'s':''}`;
   $('#sumMonth').textContent = monthMin;
   $('#sumMonthFoot').textContent = `across ${monthSits} sit${monthSits!==1?'s':''}`;
   $('#sumTotal').textContent = (total/60).toFixed(1);
   $('#sumTotalFoot').textContent = `${log.length} session${log.length!==1?'s':''} · longest ${longest} min`;
 
-  // calendar: last 35 days
-  const cal = $('#cal'); cal.innerHTML = '';
-  ['S','M','T','W','T','F','S'].forEach(x => { const h=document.createElement('div'); h.className='dow'; h.textContent=x; cal.appendChild(h); });
-  const start = new Date(); start.setDate(start.getDate() - 34);
-  const lead = start.getDay();
-  for (let i=0;i<lead;i++){ const c=document.createElement('div'); c.className='cell empty'; cal.appendChild(c); }
-  for (let i=0;i<35;i++){
-    const day = new Date(start); day.setDate(start.getDate()+i);
-    const mins = byDay[dayKey(day.getTime())] || 0;
-    const c = document.createElement('div'); c.className='cell';
-    if (mins>0) c.classList.add(mins>=45?'l3':mins>=20?'l2':'l1');
-    if (dayKey(day.getTime())===dayKey(Date.now())) c.classList.add('today');
-    c.title = `${day.toDateString()} · ${mins} min`;
-    cal.appendChild(c);
-  }
+  // calendar — reset to the current month whenever the summary opens
+  calV = { y: now.getFullYear(), m: now.getMonth() };
+  renderCalendar();
 
   // recent sessions
   const wrap = $('#sessions'); wrap.innerHTML = '';
@@ -768,6 +831,12 @@ function init() {
   $('#startBtn').onclick = begin;
   $('#pauseBtn').onclick = pause;
   $('#endBtn').onclick = endEarly;
+
+  // calendar navigation
+  $('#calPrev').onclick  = () => calStep(-1, 0);
+  $('#calNext').onclick  = () => calStep(1, 0);
+  $('#calPrevY').onclick = () => calStep(0, -1);
+  $('#calNextY').onclick = () => calStep(0, 1);
 
   // settings — default duration
   $('#setDurRange').addEventListener('input', e => {
