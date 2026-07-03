@@ -1,0 +1,6 @@
+{
+  "appId": "com.resonance.meditation",
+  "appName": "Resonance",
+  "webDir": "www",
+  "android": { "backgroundColor": "#171827" }
+}
