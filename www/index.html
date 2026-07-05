@@ -550,6 +550,34 @@ function ping() {
   setTimeout(() => r.remove(), 2700);
 }
 
+/* ---------- native bells (Android foreground service) --------------- */
+/* On Android the WebView is frozen the moment the screen turns off, so JS
+   timers and WebAudio stop — that's why bells were silent until you woke the
+   phone. The native BellService rings the bells on time instead (wake lock +
+   scheduled MediaPlayer). Here we just hand it the plan; JS only draws the
+   ripple when the screen happens to be on. Accessors are lazy so they still
+   resolve if the Capacitor bridge injects after this script runs. */
+const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const getBell  = () => (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bell) || null;
+const useNativeBells = () => isNative() && !!getBell();
+
+function nativeStart(elapsedSec) {
+  const B = getBell();
+  if (!isNative() || !B) return;
+  const s = store.s;
+  B.start({ bell: s.bell, intervalSec: (s.interval || 0) * 60, totalSec: T.total, elapsedSec: elapsedSec || 0 });
+}
+function nativeStop() {
+  const B = getBell();
+  if (isNative() && B) B.stop();
+}
+/* A bell during a live sit: native plays the sound, JS shows the ripple.
+   In the browser (no native layer) fall back to the WebAudio bell. */
+function sitBell() {
+  if (useNativeBells()) ping();
+  else strike(store.s.bell);
+}
+
 /* ---------- helpers -------------------------------------------------- */
 const $ = s => document.querySelector(s);
 const pad = n => String(n).padStart(2, '0');
@@ -603,7 +631,7 @@ function tick() {
     const mark = Math.floor(elapsedSec / intSec);      // how many intervals passed
     const totalMarks = Math.floor(T.total / intSec);
     if (mark > T.lastMark && mark < totalMarks) {       // don't ring on the final mark (closing bell handles it)
-      T.lastMark = mark; strike(store.s.bell);          // rings once even if a mark was skipped
+      T.lastMark = mark; sitBell();                     // native audio + ripple, or WebAudio in browser
     }
   }
   renderTimer();
@@ -618,15 +646,19 @@ function begin() {
   $('#startBtn').classList.add('hidden');
   $('#pauseBtn').classList.remove('hidden');
   $('#endBtn').classList.remove('hidden');
-  strike(store.s.bell);                            // opening bell — always
+  if (useNativeBells()) { nativeStart(0); ping(); } // native rings opening + schedules every bell for screen-off
+  else strike(store.s.bell);                        // browser: opening bell via WebAudio
   T.id = setInterval(tick, 250);                   // finer tick = smoother clock, wall-time keeps it accurate
 }
 function pause() {
   if (T.running) {
     clearInterval(T.id); T.running = false; T.pausedAt = Date.now();
+    nativeStop();                                  // cancel scheduled native bells while paused
     $('#pauseBtn').textContent = 'Resume';
   } else {
     T.pausedMs += Date.now() - T.pausedAt; T.running = true;
+    const elapsedSec = Math.floor((Date.now() - T.startAt - T.pausedMs) / 1000);
+    nativeStart(elapsedSec);                        // reschedule the bells still ahead
     T.id = setInterval(tick, 250);
     $('#pauseBtn').textContent = 'Pause';
   }
@@ -640,6 +672,10 @@ function stopUI() {
   $('#endBtn').classList.add('hidden');
 }
 function closeBells() {
+  if (useNativeBells()) {                         // native service already schedules the 3 closing bells
+    ping(); setTimeout(ping, 5000); setTimeout(ping, 10000);   // visual only — don't double the audio
+    return;
+  }
   strike(store.s.bell);                          // always ring 3× at 5s
   setTimeout(() => strike(store.s.bell), 5000);  // spacing so the end of
   setTimeout(() => strike(store.s.bell), 10000); // the sit is unmistakable
@@ -654,6 +690,7 @@ function finish() {
   go('s-sum');
 }
 function endEarly() {
+  nativeStop();                                    // user ended — cancel all pending native bells
   const meditated = Math.round((T.total - T.left) / 60);
   if (meditated >= 1) record(meditated);
   stopUI();
